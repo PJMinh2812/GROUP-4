@@ -13,6 +13,14 @@ public interface IAdminService
     
     // Event Approval
     Task<List<Event>> GetAllPendingEventsAsync();
+    Task<List<Event>> GetAllEventsAsync(); // Get all events for admin dashboard
     Task<Event> ApproveEventAsync(int eventId, int adminId);
     Task<Event> RejectEventAsync(int eventId, int adminId, string? rejectionReason = null);
+    
+    // Dashboard Statistics
+    Task<AdminDashboardStatsDto> GetDashboardStatsAsync();
+    Task<List<MonthlyRevenueDto>> GetMonthlyRevenueAsync(int months = 6);
+    Task<List<CategoryDistributionDto>> GetCategoryDistributionAsync();
+    Task<List<RecentUserDto>> GetRecentUsersAsync(int count = 5);
+    Task<List<OrganizerListDto>> GetOrganizersListAsync();
 }

@@ -7,6 +7,7 @@ using Tickify.Interfaces.Services;
 using Tickify.Models;
 using Tickify.Repositories;
 using Tickify.Services.Email;
+using System.Globalization;
 
 namespace Tickify.Services;
 
@@ -350,5 +351,211 @@ public class AdminService : IAdminService
             .Where(e => e.Status == EventStatus.Pending)
             .OrderByDescending(e => e.CreatedAt)
             .ToListAsync();
+    }
+
+    public async Task<List<Event>> GetAllEventsAsync()
+    {
+        return await _context.Events
+            .Include(e => e.Category)
+            .Include(e => e.Organizer)
+                .ThenInclude(o => o!.User)
+            .OrderByDescending(e => e.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<AdminDashboardStatsDto> GetDashboardStatsAsync()
+    {
+        // Calculate total revenue from completed payments
+        var totalRevenue = await _context.Payments
+            .Where(p => p.Status == PaymentStatus.Completed)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+        // Platform fee is 10% of total revenue
+        var platformFees = totalRevenue * 0.10m;
+
+        // Get event counts
+        var totalEvents = await _context.Events.CountAsync();
+        var activeEvents = await _context.Events
+            .CountAsync(e => e.Status == EventStatus.Published || e.Status == EventStatus.Approved);
+        var pendingEvents = await _context.Events
+            .CountAsync(e => e.Status == EventStatus.Pending);
+
+        // Get user counts
+        var totalUsers = await _context.Users.CountAsync();
+        var activeUsers = await _context.Users
+            .CountAsync(u => u.IsActive);
+
+        // Get organizer counts
+        var totalOrganizers = await _context.Organizers.CountAsync();
+        var pendingOrganizerRequests = await _context.OrganizerRequests
+            .CountAsync(r => r.Status == "Pending");
+
+        // Calculate revenue growth (compare last month with previous month)
+        var now = DateTime.UtcNow;
+        var lastMonth = new DateTime(now.Year, now.Month, 1).AddMonths(-1);
+        var previousMonth = lastMonth.AddMonths(-1);
+        var lastMonthRevenue = await _context.Payments
+            .Where(p => p.Status == PaymentStatus.Completed &&
+                       p.PaidAt >= lastMonth &&
+                       p.PaidAt < lastMonth.AddMonths(1))
+            .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+        var previousMonthRevenue = await _context.Payments
+            .Where(p => p.Status == PaymentStatus.Completed &&
+                       p.PaidAt >= previousMonth &&
+                       p.PaidAt < lastMonth)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+        var revenueGrowth = previousMonthRevenue > 0
+            ? ((lastMonthRevenue - previousMonthRevenue) / previousMonthRevenue) * 100
+            : 0m;
+
+        // Calculate user growth
+        var lastMonthUsers = await _context.Users
+            .CountAsync(u => u.CreatedAt >= lastMonth && u.CreatedAt < lastMonth.AddMonths(1));
+        var previousMonthUsers = await _context.Users
+            .CountAsync(u => u.CreatedAt >= previousMonth && u.CreatedAt < lastMonth);
+        var userGrowth = previousMonthUsers > 0
+            ? ((lastMonthUsers - previousMonthUsers) / (decimal)previousMonthUsers) * 100
+            : 0m;
+
+        return new AdminDashboardStatsDto
+        {
+            TotalRevenue = totalRevenue,
+            PlatformFees = platformFees,
+            TotalEvents = totalEvents,
+            ActiveEvents = activeEvents,
+            TotalUsers = totalUsers,
+            ActiveUsers = activeUsers,
+            TotalOrganizers = totalOrganizers,
+            PendingEvents = pendingEvents,
+            PendingOrganizerRequests = pendingOrganizerRequests,
+            RevenueGrowthPercentage = revenueGrowth,
+            UserGrowthPercentage = userGrowth
+        };
+    }
+
+    public async Task<List<MonthlyRevenueDto>> GetMonthlyRevenueAsync(int months = 6)
+    {
+        var now = DateTime.UtcNow;
+        var results = new List<MonthlyRevenueDto>();
+
+        for (int i = months - 1; i >= 0; i--)
+        {
+            var monthStart = new DateTime(now.Year, now.Month, 1).AddMonths(-i);
+            var monthEnd = monthStart.AddMonths(1);
+
+            var revenue = await _context.Payments
+                .Where(p => p.Status == PaymentStatus.Completed &&
+                           p.PaidAt >= monthStart &&
+                           p.PaidAt < monthEnd)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            var users = await _context.Users
+                .CountAsync(u => u.CreatedAt >= monthStart && u.CreatedAt < monthEnd);
+
+            var monthName = monthStart.ToString("MMM", CultureInfo.InvariantCulture);
+            results.Add(new MonthlyRevenueDto
+            {
+                Month = monthName,
+                Revenue = revenue,
+                Users = users
+            });
+        }
+
+        return results;
+    }
+
+    public async Task<List<CategoryDistributionDto>> GetCategoryDistributionAsync()
+    {
+        var totalEvents = await _context.Events.CountAsync();
+        if (totalEvents == 0)
+        {
+            return new List<CategoryDistributionDto>();
+        }
+
+        var categoryStats = await _context.Events
+            .Include(e => e.Category)
+            .Where(e => e.Category != null)
+            .GroupBy(e => new { e.Category!.Id, e.Category.Name })
+            .Select(g => new
+            {
+                CategoryName = g.Key.Name,
+                Count = g.Count(),
+                Percentage = (g.Count() * 100.0) / totalEvents
+            })
+            .ToListAsync();
+
+        var colors = new[] { "#f97316", "#3b82f6", "#8b5cf6", "#10b981", "#6b7280", "#ef4444", "#f59e0b" };
+        var colorIndex = 0;
+
+        return categoryStats.Select(c => new CategoryDistributionDto
+        {
+            Name = c.CategoryName,
+            Value = (int)Math.Round(c.Percentage),
+            Color = colors[colorIndex++ % colors.Length]
+        }).ToList();
+    }
+
+    public async Task<List<RecentUserDto>> GetRecentUsersAsync(int count = 5)
+    {
+        var recentUsers = await _context.Users
+            .OrderByDescending(u => u.CreatedAt)
+            .Take(count)
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName,
+                u.Email,
+                u.CreatedAt,
+                Orders = _context.Bookings.Count(b => b.UserId == u.Id && b.Status == BookingStatus.Confirmed),
+                Spent = _context.Bookings
+                    .Where(b => b.UserId == u.Id && 
+                               b.Status == BookingStatus.Confirmed &&
+                               b.Payment != null &&
+                               b.Payment.Status == PaymentStatus.Completed)
+                    .Sum(b => (decimal?)b.Payment!.Amount) ?? 0m
+            })
+            .ToListAsync();
+
+        return recentUsers.Select(u => new RecentUserDto
+        {
+            Id = u.Id,
+            Name = u.FullName,
+            Email = u.Email,
+            Joined = u.CreatedAt,
+            Orders = u.Orders,
+            Spent = u.Spent
+        }).ToList();
+    }
+
+    public async Task<List<OrganizerListDto>> GetOrganizersListAsync()
+    {
+        var organizers = await _context.Organizers
+            .Include(o => o.User)
+            .Select(o => new
+            {
+                o.Id,
+                CompanyName = o.CompanyName,
+                Email = o.User != null ? o.User.Email : "",
+                IsVerified = o.IsVerified,
+                Events = _context.Events.Count(e => e.OrganizerId == o.Id),
+                Revenue = _context.Events
+                    .Where(e => e.OrganizerId == o.Id)
+                    .SelectMany(e => e.Bookings!)
+                    .Where(b => b.Status == BookingStatus.Confirmed &&
+                               b.Payment != null &&
+                               b.Payment.Status == PaymentStatus.Completed)
+                    .Sum(b => (decimal?)b.Payment!.Amount) ?? 0m
+            })
+            .ToListAsync();
+
+        return organizers.Select(o => new OrganizerListDto
+        {
+            Id = o.Id,
+            Name = o.CompanyName,
+            Email = o.Email,
+            Events = o.Events,
+            Revenue = o.Revenue,
+            Status = o.IsVerified ? "verified" : "pending"
+        }).ToList();
     }
 }

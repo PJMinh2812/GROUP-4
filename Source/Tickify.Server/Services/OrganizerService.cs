@@ -425,7 +425,8 @@ public class OrganizerService : IOrganizerService
 
         var topEvents = await _context.Events
             .AsNoTracking()
-            .Where(e => e.OrganizerId == organizerId && e.Status != EventStatus.Rejected)
+            .Where(e => e.OrganizerId == organizerId 
+                && (e.Status == EventStatus.Published || e.Status == EventStatus.Approved)) // Published or Approved events
             .Select(e => new OrganizerTopEventDto
             {
                 EventId = e.Id,
@@ -441,6 +442,7 @@ public class OrganizerService : IOrganizerService
                     .SelectMany(b => b.Tickets!)
                     .Count(t => t.Status != TicketStatus.Cancelled && t.Status != TicketStatus.Refunded)
             })
+            .Where(e => e.Revenue > 0 || e.TicketsSold > 0) // Only events with sales
             .OrderByDescending(e => e.Revenue)
             .ThenByDescending(e => e.TicketsSold)
             .Take(5)

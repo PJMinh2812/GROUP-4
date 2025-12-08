@@ -252,8 +252,8 @@ public class EventService : IEventService
                 throw new BadRequestException("This event cannot be edited (already completed)");
             else if (currentEvent?.Status == EventStatus.Cancelled)
                 throw new BadRequestException("This event cannot be edited (already cancelled)");
-            else if (currentEvent?.StartDate <= DateTime.UtcNow)
-                throw new BadRequestException("This event cannot be edited (already started or ended)");
+            else if (currentEvent?.Status == EventStatus.Published)
+                throw new BadRequestException("This event cannot be edited (already published)");
             else
                 throw new BadRequestException("This event cannot be edited");
         }
@@ -672,6 +672,53 @@ public class EventService : IEventService
             })
             .ToList() ?? new List<TicketTypeSalesDto>();
 
+        // Sales by date (group bookings by date)
+        var salesByDate = confirmedBookings
+            .GroupBy(b => b.BookingDate.Date)
+            .Select(g => new SalesByDateDto
+            {
+                Date = g.Key,
+                Revenue = g.Sum(b => b.TotalAmount),
+                TicketsSold = g.Sum(b => b.Tickets?.Count ?? 0)
+            })
+            .OrderBy(s => s.Date)
+            .ToList();
+
+        // Top buyers
+        var topBuyers = confirmedBookings
+            .Where(b => b.User != null)
+            .GroupBy(b => b.User!)
+            .Select(g => new TopBuyerDto
+            {
+                UserId = g.Key.Id,
+                UserName = g.Key.FullName,
+                Email = g.Key.Email,
+                TicketsPurchased = g.Sum(b => b.Tickets?.Count ?? 0),
+                TotalSpent = g.Sum(b => b.TotalAmount),
+                LastPurchaseDate = g.Max(b => b.BookingDate)
+            })
+            .OrderByDescending(tb => tb.TotalSpent)
+            .Take(10)
+            .ToList();
+
+        // Recent transactions
+        var recentTransactions = confirmedBookings
+            .OrderByDescending(b => b.BookingDate)
+            .Take(10)
+            .Select(b => new RecentTransactionDto
+            {
+                TransactionId = b.BookingCode,
+                BuyerName = b.User?.FullName ?? "Unknown",
+                Amount = b.TotalAmount,
+                TransactionDate = b.BookingDate,
+                Status = b.Status.ToString()
+            })
+            .ToList();
+
+        // Calculate sold seats - use actual tickets sold count instead of totalSeats - availableSeats
+        // This ensures accuracy even if AvailableQuantity isn't updated correctly
+        var soldSeats = totalTicketsSold;
+
         return new EventStatsDto
         {
             EventId = eventEntity.Id,
@@ -693,7 +740,12 @@ public class EventService : IEventService
                 : null,
             LastSaleDate = confirmedBookings.Any()
                 ? confirmedBookings.Max(b => b.BookingDate)
-                : null
+                : null,
+            SalesByDate = salesByDate,
+            TopBuyers = topBuyers,
+            RecentTransactions = recentTransactions,
+            PageViews = 0, // TODO: Implement page view tracking
+            SoldSeats = soldSeats
         };
     }
 
@@ -708,6 +760,8 @@ public class EventService : IEventService
     }
 
     /// Check if event can be edited
+    /// Organizer can edit events with status: Pending, Approved, Rejected
+    /// Cannot edit: Cancelled, Completed, Published
     public async Task<bool> CanEditEventAsync(int eventId)
     {
         var eventEntity = await _eventRepository.GetByIdAsync(eventId);
@@ -715,16 +769,10 @@ public class EventService : IEventService
         if (eventEntity == null)
             return false;
 
-        // Cannot edit if event has already started or completed
-        if (eventEntity.StartDate <= DateTime.UtcNow)
-            return false;
-
-        // Cannot edit cancelled or completed events
-        if (eventEntity.Status == EventStatus.Cancelled || eventEntity.Status == EventStatus.Completed)
-            return false;
-
-        // Can edit Pending, Rejected, Approved, or Published events (as long as not started)
-        return true;
+        // Can edit only if status is Pending, Approved, or Rejected
+        return eventEntity.Status == EventStatus.Pending ||
+               eventEntity.Status == EventStatus.Approved ||
+               eventEntity.Status == EventStatus.Rejected;
     }
 
     /// Check if event can be canceled
