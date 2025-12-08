@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Calendar,
@@ -60,14 +60,14 @@ import {
 import { organizerService, type OrganizerEventDto } from '../services/organizerService';
 import { authService } from '../services/authService';
 import apiClient from '../services/apiClient';
-import { mockEvents } from "../mockData";
+import { toast } from "sonner";
 
 interface EventManagementProps {
   onNavigate: (page: string, eventId?: string) => void;
 }
 
 type ViewMode = "grid" | "list";
-type StatusFilter = "all" | "published" | "draft" | "cancelled";
+type StatusFilter = "all" | "Pending" | "Approved" | "Rejected" | "Published" | "Cancelled" | "Completed";
 type DateFilter = "all" | "upcoming" | "past";
 
 interface EventWithStats {
@@ -82,6 +82,8 @@ interface EventWithStats {
   status: "published" | "draft" | "cancelled";
   ticketsSold: number;
   totalTickets: number;
+  soldSeats: number;
+  totalSeats: number;
   revenue: number;
 }
 
@@ -97,45 +99,59 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Mock event data with stats
-  const eventsWithStats: EventWithStats[] = mockEvents.map((event, index) => ({
-    id: event.id,
-    title: event.title,
-    date: event.date,
-    time: event.time,
-    venue: event.venue,
-    city: event.city,
-    category: event.category,
-    image: event.image,
-    status:
-      index % 5 === 0 ? "draft" : index % 7 === 0 ? "cancelled" : "published",
-    ticketsSold: Math.floor(Math.random() * 500),
-    totalTickets: 500,
-    revenue: Math.floor(Math.random() * 50000000) + 10000000,
-  }));
+  // Load events from API
+  useEffect(() => {
+    const loadEvents = async () => {
+      try {
+        setIsLoading(true);
+        const currentUser = authService.getCurrentUser();
+        if (!currentUser?.organizerId) {
+          throw new Error('Organizer ID not found');
+        }
+        const data = await organizerService.getOrganizerEvents(currentUser.organizerId);
+        setEvents(data);
+        setError('');
+      } catch (err: any) {
+        console.error("Failed to load events:", err);
+        setError(err.response?.data?.message || "Failed to load events");
+        toast.error("Không thể tải danh sách sự kiện", {
+          description: err.response?.data?.message || "Vui lòng thử lại sau",
+          duration: 2000,
+          closeButton: false,
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  // Calculate stats
-  const totalEvents = eventsWithStats.length;
-  const activeEvents = eventsWithStats.filter(
-    (e) => e.status === "published"
+    loadEvents();
+  }, []);
+
+  // Check if event can be edited
+  const canEditEvent = (status: string): boolean => {
+    return status === "Pending" || status === "Approved" || status === "Rejected";
+  };
+
+  // Calculate stats from real events
+  const totalEvents = events.length;
+  const activeEvents = events.filter(
+    (e) => e.status === "Published" || e.status === "Approved"
   ).length;
-  const totalTicketsSold = eventsWithStats.reduce(
-    (sum, e) => sum + e.ticketsSold,
+  const totalTicketsSold = events.reduce(
+    (sum, e) => sum + e.soldSeats,
     0
   );
-  const totalRevenue = eventsWithStats.reduce((sum, e) => sum + e.revenue, 0);
+  const totalRevenue = events.reduce((sum, e) => sum + e.revenue, 0);
 
   // Filter events
-  const filteredEvents = eventsWithStats.filter((event) => {
+  const filteredEvents = events.filter((event) => {
     const matchesSearch =
-      event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      event.venue.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      event.city.toLowerCase().includes(searchTerm.toLowerCase());
+      event.title.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesStatus =
       statusFilter === "all" || event.status === statusFilter;
 
-    const eventDate = new Date(event.date);
+    const eventDate = new Date(event.startDate);
     const today = new Date();
     const matchesDate =
       dateFilter === "all" ||
@@ -163,22 +179,40 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "published":
+      case "Pending":
+        return (
+          <Badge className="bg-yellow-100 text-yellow-700">
+            {t("eventManagement.pending", "Pending")}
+          </Badge>
+        );
+      case "Approved":
         return (
           <Badge className="bg-green-100 text-green-700">
-            {t("eventManagement.published")}
+            {t("eventManagement.approved", "Approved")}
           </Badge>
         );
-      case "draft":
-        return (
-          <Badge className="bg-amber-100 text-amber-700">
-            {t("eventManagement.draft")}
-          </Badge>
-        );
-      case "cancelled":
+      case "Rejected":
         return (
           <Badge className="bg-red-100 text-red-700">
-            {t("eventManagement.cancelled")}
+            {t("eventManagement.rejected", "Rejected")}
+          </Badge>
+        );
+      case "Published":
+        return (
+          <Badge className="bg-blue-100 text-blue-700">
+            {t("eventManagement.published", "Published")}
+          </Badge>
+        );
+      case "Cancelled":
+        return (
+          <Badge className="bg-red-100 text-red-700">
+            {t("eventManagement.cancelled", "Cancelled")}
+          </Badge>
+        );
+      case "Completed":
+        return (
+          <Badge className="bg-gray-100 text-gray-700">
+            {t("eventManagement.completed", "Completed")}
           </Badge>
         );
       default:
@@ -349,16 +383,25 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">
-                    {t("eventManagement.allStatus")}
+                    {t("eventManagement.allStatus", "All Status")}
                   </SelectItem>
-                  <SelectItem value="published">
-                    {t("eventManagement.published")}
+                  <SelectItem value="Pending">
+                    {t("eventManagement.pending", "Pending")}
                   </SelectItem>
-                  <SelectItem value="draft">
-                    {t("eventManagement.draft")}
+                  <SelectItem value="Approved">
+                    {t("eventManagement.approved", "Approved")}
                   </SelectItem>
-                  <SelectItem value="cancelled">
-                    {t("eventManagement.cancelled")}
+                  <SelectItem value="Rejected">
+                    {t("eventManagement.rejected", "Rejected")}
+                  </SelectItem>
+                  <SelectItem value="Published">
+                    {t("eventManagement.published", "Published")}
+                  </SelectItem>
+                  <SelectItem value="Cancelled">
+                    {t("eventManagement.cancelled", "Cancelled")}
+                  </SelectItem>
+                  <SelectItem value="Completed">
+                    {t("eventManagement.completed", "Completed")}
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -388,7 +431,13 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
         {/* Events Grid View */}
         {viewMode === "grid" && (
           <>
-            {filteredEvents.length === 0 ? (
+            {isLoading ? (
+              <Card className="p-16">
+                <div className="text-center">
+                  <div className="text-neutral-600">{t("eventManagement.loading", "Loading events...")}</div>
+                </div>
+              </Card>
+            ) : filteredEvents.length === 0 ? (
               <Card className="p-16">
                 <div className="text-center">
                   <Calendar
@@ -424,15 +473,18 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredEvents.map((event) => (
+                {filteredEvents.map((event) => {
+                  const eventIdStr = event.eventId.toString();
+                  const canEdit = canEditEvent(event.status);
+                  return (
                   <Card
-                    key={event.id}
+                    key={event.eventId}
                     className="overflow-hidden hover:shadow-lg transition-shadow"
                   >
                     <div className="relative">
                       <div className="aspect-video bg-neutral-200 overflow-hidden">
                         <img
-                          src={event.image}
+                          src={event.bannerImage || "/placeholder-event.jpg"}
                           alt={event.title}
                           className="w-full h-full object-cover"
                         />
@@ -449,11 +501,8 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                         <div className="flex items-center gap-2">
                           <Calendar size={14} />
                           <span>
-                            {formatDate(event.date)} • {event.time}
+                            {formatDate(event.startDate)}
                           </span>
-                        </div>
-                        <div className="truncate">
-                          {event.venue}, {event.city}
                         </div>
                       </div>
 
@@ -483,7 +532,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                           variant="outline"
                           size="sm"
                           className="flex-1"
-                          onClick={() => handleEventAction("view", event.id)}
+                          onClick={() => handleEventAction("view", eventIdStr)}
                         >
                           <Eye size={14} className="mr-1" />
                           {t("eventManagement.viewDetails")}
@@ -492,7 +541,9 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                           variant="outline"
                           size="sm"
                           className="flex-1"
-                          onClick={() => handleEventAction("edit", event.id)}
+                          disabled={!canEdit}
+                          onClick={() => handleEventAction("edit", eventIdStr)}
+                          title={!canEdit ? t("eventManagement.cannotEdit", "Cannot edit this event") : ""}
                         >
                           <Edit size={14} className="mr-1" />
                           {t("eventManagement.editEvent")}
@@ -506,7 +557,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
                               onClick={() =>
-                                handleEventAction("analytics", event.id)
+                                handleEventAction("analytics", eventIdStr)
                               }
                             >
                               <TrendingUp size={14} className="mr-2" />
@@ -514,7 +565,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                handleEventAction("edit-seat-map", event.id)
+                                handleEventAction("edit-seat-map", eventIdStr)
                               }
                             >
                               <Grid3x3 size={14} className="mr-2" />
@@ -522,7 +573,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                handleEventAction("duplicate", event.id)
+                                handleEventAction("duplicate", eventIdStr)
                               }
                             >
                               <Copy size={14} className="mr-2" />
@@ -531,7 +582,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               onClick={() =>
-                                handleEventAction("cancel", event.id)
+                                handleEventAction("cancel", eventIdStr)
                               }
                               className="text-red-600"
                             >
@@ -540,7 +591,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                handleEventAction("delete", event.id)
+                                handleEventAction("delete", eventIdStr)
                               }
                               className="text-red-600"
                             >
@@ -552,7 +603,8 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>
@@ -562,7 +614,11 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
         {viewMode === "list" && (
           <Card>
             <CardContent className="p-0">
-              {filteredEvents.length === 0 ? (
+              {isLoading ? (
+                <div className="text-center py-16">
+                  <div className="text-neutral-600">{t("eventManagement.loading", "Loading events...")}</div>
+                </div>
+              ) : filteredEvents.length === 0 ? (
                 <div className="text-center py-16">
                   <Calendar
                     className="mx-auto text-neutral-400 mb-4"
@@ -617,12 +673,15 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredEvents.map((event) => (
-                      <TableRow key={event.id} className="hover:bg-neutral-50">
+                    {filteredEvents.map((event) => {
+                      const eventIdStr = event.eventId.toString();
+                      const canEdit = canEditEvent(event.status);
+                      return (
+                      <TableRow key={event.eventId} className="hover:bg-neutral-50">
                         <TableCell>
                           <div className="w-16 h-16 bg-neutral-200 rounded overflow-hidden">
                             <img
-                              src={event.image}
+                              src={event.bannerImage || "/placeholder-event.jpg"}
                               alt={event.title}
                               className="w-full h-full object-cover"
                             />
@@ -630,22 +689,13 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                         </TableCell>
                         <TableCell>
                           <div className="text-neutral-900">{event.title}</div>
-                          <div className="text-sm text-neutral-500">
-                            {event.category}
-                          </div>
                         </TableCell>
                         <TableCell>
-                          <div>{formatDate(event.date)}</div>
-                          <div className="text-sm text-neutral-500">
-                            {event.time}
-                          </div>
+                          <div>{formatDate(event.startDate)}</div>
                         </TableCell>
                         <TableCell>
                           <div className="max-w-[200px]">
-                            <div className="truncate">{event.venue}</div>
-                            <div className="text-sm text-neutral-500">
-                              {event.city}
-                            </div>
+                            <div className="truncate">-</div>
                           </div>
                         </TableCell>
                         <TableCell>{getStatusBadge(event.status)}</TableCell>
@@ -665,7 +715,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
                                 onClick={() =>
-                                  handleEventAction("view", event.id)
+                                  handleEventAction("view", eventIdStr)
                                 }
                               >
                                 <Eye size={14} className="mr-2" />
@@ -673,15 +723,17 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
-                                  handleEventAction("edit", event.id)
+                                  handleEventAction("edit", eventIdStr)
                                 }
+                                disabled={!canEdit}
+                                title={!canEdit ? t("eventManagement.cannotEdit", "Cannot edit this event") : ""}
                               >
                                 <Edit size={14} className="mr-2" />
                                 {t("eventManagement.editEvent")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
-                                  handleEventAction("edit-seat-map", event.id)
+                                  handleEventAction("edit-seat-map", eventIdStr)
                                 }
                               >
                                 <Grid3x3 size={14} className="mr-2" />
@@ -689,7 +741,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
-                                  handleEventAction("analytics", event.id)
+                                  handleEventAction("analytics", eventIdStr)
                                 }
                               >
                                 <TrendingUp size={14} className="mr-2" />
@@ -697,7 +749,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
-                                  handleEventAction("duplicate", event.id)
+                                  handleEventAction("duplicate", eventIdStr)
                                 }
                               >
                                 <Copy size={14} className="mr-2" />
@@ -706,7 +758,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onClick={() =>
-                                  handleEventAction("cancel", event.id)
+                                  handleEventAction("cancel", eventIdStr)
                                 }
                                 className="text-red-600"
                               >
@@ -715,7 +767,7 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
-                                  handleEventAction("delete", event.id)
+                                  handleEventAction("delete", eventIdStr)
                                 }
                                 className="text-red-600"
                               >
@@ -726,7 +778,8 @@ export function EventManagement({ onNavigate }: EventManagementProps) {
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}

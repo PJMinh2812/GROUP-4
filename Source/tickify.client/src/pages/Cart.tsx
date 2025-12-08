@@ -43,17 +43,20 @@ export function Cart({ items, onNavigate, onUpdateCart }: CartProps) {
       }
 
       const result = await promoCodeService.validatePromoCode({
-        promoCode: promoCode.trim(),
-        eventId,
-        totalAmount: subtotal,
+        code: promoCode.trim(),
+        eventId: parseInt(eventId),
+        orderTotal: subtotal,
       });
 
-      if (result.isValid) {
-        setDiscount(result.discountAmount);
+      // PromoCode is returned if valid
+      if (result && result.isActive) {
+        const discountValue = result.discountAmount || 
+          (result.discountPercent ? subtotal * (result.discountPercent / 100) : 0);
+        setDiscount(discountValue);
         setPromoError("");
       } else {
         setDiscount(0);
-        setPromoError(result.message || "Invalid promo code");
+        setPromoError("Invalid or inactive promo code");
       }
     } catch (error: any) {
       console.error("Promo validation error:", error);

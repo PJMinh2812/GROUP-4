@@ -6,7 +6,6 @@ import {
   Eye,
   Target,
   TrendingUp,
-  TrendingDown,
   Download,
   Calendar,
   ArrowLeft,
@@ -38,18 +37,12 @@ import {
   TableRow,
 } from '../components/ui/table';
 import {
-  LineChart,
-  Line,
   BarChart,
   Bar,
-  PieChart,
-  Pie,
-  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   Area,
   AreaChart,
@@ -63,15 +56,6 @@ interface EventAnalyticsProps {
 
 type DateRange = '7days' | '30days' | 'all' | 'custom';
 
-const formatDate = (dateString: string) => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', { 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  });
-};
-
 export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
   const { t } = useTranslation();
   const [dateRange, setDateRange] = useState<DateRange>('7days');
@@ -83,7 +67,7 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
     if (eventId) {
       loadEventAnalytics();
     }
-  }, [eventId]);
+  }, [eventId]); // Backend API doesn't support date range filtering
 
   const loadEventAnalytics = async () => {
     try {
@@ -91,13 +75,15 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
       
       // GET /api/events/{id}/stats - Get event statistics
       const statsData = await eventService.getEventStatistics(Number(eventId));
+      console.log('📊 Event Stats Data:', statsData);
       setStats(statsData);
 
       // Load basic event data
       const eventData = await eventService.getEventById(Number(eventId));
+      console.log('🎫 Event Data:', eventData);
       setEvent(eventData);
     } catch (error) {
-      console.error('Error loading analytics:', error);
+      console.error('❌ Error loading analytics:', error);
     } finally {
       setIsLoading(false);
     }
@@ -199,19 +185,6 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
     });
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return <Badge className="bg-green-100 text-green-700">{t('eventAnalytics.status.completed')}</Badge>;
-      case 'pending':
-        return <Badge className="bg-amber-100 text-amber-700">{t('eventAnalytics.status.pending')}</Badge>;
-      case 'failed':
-        return <Badge className="bg-red-100 text-red-700">{t('eventAnalytics.status.failed')}</Badge>;
-      default:
-        return <Badge>{status}</Badge>;
-    }
-  };
-
   const handleExport = (format: string) => {
     // TODO: Implement export functionality
   };
@@ -236,26 +209,90 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
     );
   }
 
-  // Map stats data to chart format
-  const salesOverTimeData = stats.salesByDate?.map((item) => ({
+  // Filter data based on selected date range
+  const filterDataByDateRange = (salesByDate: any[]) => {
+    if (!salesByDate || salesByDate.length === 0) return [];
+    
+    const now = new Date();
+    let startDate: Date;
+    
+    switch (dateRange) {
+      case '7days':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30days':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case 'all':
+        return salesByDate; // Return all data
+      case 'custom':
+        // TODO: Implement custom date range picker
+        return salesByDate;
+      default:
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    }
+    
+    return salesByDate.filter(item => {
+      const itemDate = new Date(item.date);
+      return itemDate >= startDate;
+    });
+  };
+
+  // Map stats data to chart format with date range filter
+  const filteredSalesByDate = filterDataByDateRange(stats.salesByDate || []);
+  
+  const salesOverTimeData = filteredSalesByDate.map((item) => ({
     date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     revenue: item.revenue,
     tickets: item.ticketsSold,
-  })) || [];
+  }));
 
-  const salesByTicketType = stats.salesByTicketType?.map((item, index) => ({
-    name: item.ticketTypeName,
-    value: item.sold,
-    percentage: stats.soldSeats ? Math.round((item.sold / stats.soldSeats) * 100) : 0,
-    color: ['#14b8a6', '#22c55e', '#10b981', '#f59e0b', '#ef4444'][index % 5],
-  })) || [];
+  // Calculate filtered metrics based on date range
+  const filteredTotalRevenue = filteredSalesByDate.reduce((sum, item) => sum + item.revenue, 0);
+  const filteredTotalTickets = filteredSalesByDate.reduce((sum, item) => sum + item.ticketsSold, 0);
+  
+  // Use filtered data if date range is not 'all', otherwise use stats totals
+  const displayRevenue = dateRange === 'all' ? stats.totalRevenue : filteredTotalRevenue;
+  const displayTicketsSold = dateRange === 'all' ? stats.totalTicketsSold : filteredTotalTickets;
 
-  const trafficSourcesData = stats.trafficSources?.map((item) => ({
-    source: item.sourceName,
-    visits: item.visits,
-  })) || [];
+  console.log('📈 Sales Over Time Data (filtered):', salesOverTimeData);
+  console.log('🎟️ Date Range:', dateRange);
+  console.log('🗓️ Filtered Sales by Date:', filteredSalesByDate);
+  console.log('💰 Display Metrics:', {
+    displayRevenue,
+    displayTicketsSold,
+    avgTicketPrice: displayTicketsSold > 0 ? displayRevenue / displayTicketsSold : 0,
+    dateRange,
+    isFiltered: dateRange !== 'all',
+    originalRevenue: stats.totalRevenue,
+    originalTickets: stats.totalTicketsSold,
+  });
 
-  const topBuyers = stats.topBuyers?.map((buyer) => ({
+  // Filter topBuyers by date range
+  const filterTransactionsByDateRange = (transactions: any[] | undefined) => {
+    if (!transactions || dateRange === 'all') return transactions || [];
+    
+    const now = new Date();
+    let startDate: Date;
+    
+    switch (dateRange) {
+      case '7days':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30days':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        return transactions;
+    }
+    
+    return transactions.filter(item => {
+      const itemDate = new Date(item.lastPurchaseDate || item.transactionDate);
+      return itemDate >= startDate;
+    });
+  };
+
+  const topBuyers = filterTransactionsByDateRange(stats.topBuyers)?.map((buyer) => ({
     id: buyer.userId.toString(),
     name: buyer.userName,
     email: buyer.email,
@@ -264,7 +301,7 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
     date: new Date(buyer.lastPurchaseDate).toLocaleDateString(),
   })) || [];
 
-  const recentTransactions = stats.recentTransactions?.map((txn) => ({
+  const recentTransactions = filterTransactionsByDateRange(stats.recentTransactions)?.map((txn) => ({
     id: txn.transactionId,
     buyer: txn.buyerName,
     amount: txn.amount,
@@ -376,7 +413,7 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
                 </div>
               </div>
               <div className="text-2xl text-neutral-900 mb-2">
-                {(stats.totalRevenue || 0).toLocaleString('vi-VN')}₫
+                {(displayRevenue || 0).toLocaleString('vi-VN')}₫
               </div>
               <div className="flex items-center gap-1 text-sm text-green-600">
                 <TrendingUp size={14} />
@@ -395,10 +432,13 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
                 </div>
               </div>
               <div className="text-2xl text-neutral-900 mb-2">
-                {stats.soldSeats || 0}/{stats.totalSeats || 0}
+                {dateRange === 'all' ? `${stats.soldSeats || 0}/${stats.totalSeats || 0}` : `${displayTicketsSold || 0}`}
               </div>
               <div className="text-sm text-neutral-600">
-                {stats.totalSeats ? ((stats.soldSeats / stats.totalSeats) * 100).toFixed(1) : '0.0'}% {t('eventAnalytics.capacity')}
+                {dateRange === 'all' 
+                  ? `${stats.totalSeats ? ((stats.soldSeats / stats.totalSeats) * 100).toFixed(1) : '0.0'}% ${t('eventAnalytics.capacity')}`
+                  : `${t('eventAnalytics.inSelectedPeriod')}`
+                }
               </div>
             </CardContent>
           </Card>
@@ -436,24 +476,22 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
           </Card>
         </div>
 
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Sales Over Time */}
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('eventAnalytics.salesOverTime')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={salesOverTimeData}>
+        {/* Revenue Chart - Full Width */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>{t('eventAnalytics.salesOverTime')}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={320}>
+                <AreaChart data={salesOverTimeData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#14b8a6" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" stroke="#6b7280" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
                   <YAxis 
                     stroke="#6b7280" 
                     fontSize={12} 
@@ -487,97 +525,97 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
             </CardContent>
           </Card>
 
+        {/* Tickets & Sales Stats Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           {/* Tickets Sold Over Time */}
-          <Card>
+          <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>{t('eventAnalytics.ticketsSoldOverTime')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={salesOverTimeData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" stroke="#6b7280" fontSize={12} />
-                  <YAxis stroke="#6b7280" fontSize={12} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                    }}
-                  />
-                  <Bar dataKey="tickets" fill="#22c55e" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* Sales by Ticket Type */}
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('eventAnalytics.salesByTicketType')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={salesByTicketType}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, value }) => `${name} ${((value / salesByTicketType.reduce((sum, item) => sum + item.value, 0)) * 100).toFixed(0)}%`}
-                    outerRadius={100}
-                    innerRadius={60}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {salesByTicketType.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="flex justify-center gap-4 mt-4">
-                {salesByTicketType.map((item) => (
-                  <div key={item.name} className="flex items-center gap-2">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    <span className="text-sm text-neutral-600">{item.name}</span>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <CardTitle>{t('eventAnalytics.ticketsSoldOverTime')}</CardTitle>
+                <div className="flex items-center gap-2">
+                  <Ticket className="text-green-600" size={16} />
+                  <span className="text-lg font-semibold text-neutral-900">
+                    {displayTicketsSold || 0}
+                  </span>
+                </div>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Traffic Sources */}
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('eventAnalytics.trafficSources')}</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={trafficSourcesData} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" stroke="#6b7280" fontSize={12} />
-                  <YAxis dataKey="source" type="category" stroke="#6b7280" fontSize={12} width={100} />
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={salesOverTimeData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+                  <YAxis stroke="#6b7280" fontSize={12} tickLine={false} />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: 'white',
                       border: '1px solid #e5e7eb',
                       borderRadius: '8px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                     }}
+                    cursor={{ fill: 'rgba(20, 184, 166, 0.1)' }}
                   />
-                  <Bar dataKey="visits" fill="#06b6d4" radius={[0, 8, 8, 0]} />
+                  <Bar dataKey="tickets" fill="#22c55e" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Sales Summary */}
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('eventAnalytics.salesSummary')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-neutral-600">{t('eventAnalytics.ticketsSold')}</span>
+                    <span className="text-lg font-semibold">{dateRange === 'all' ? (stats.soldSeats || 0) : (displayTicketsSold || 0)}</span>
+                  </div>
+                  <div className="w-full bg-neutral-200 rounded-full h-2">
+                    <div 
+                      className="bg-green-500 h-2 rounded-full transition-all"
+                      style={{ width: `${dateRange === 'all' && stats.totalSeats ? ((stats.soldSeats || 0) / stats.totalSeats * 100) : (filteredSalesByDate.length > 0 ? 100 : 0)}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-neutral-500 mt-1">
+                    {dateRange === 'all' ? `${stats.totalSeats ? (((stats.soldSeats || 0) / stats.totalSeats * 100).toFixed(1)) : 0}% ${t('eventAnalytics.capacity')}` : t('eventAnalytics.inSelectedPeriod')}
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-neutral-600">{t('eventAnalytics.averageTicketPrice')}</span>
+                    <span className="text-lg font-semibold text-teal-600">
+                      {formatCurrency(
+                        dateRange === 'all' 
+                          ? ((stats.soldSeats && stats.soldSeats > 0) ? (stats.totalRevenue / stats.soldSeats) : 0)
+                          : ((displayTicketsSold && displayTicketsSold > 0) ? (displayRevenue / displayTicketsSold) : 0)
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-neutral-600">{t('eventAnalytics.conversionRate')}</span>
+                    <span className="text-lg font-semibold">{conversionRate}%</span>
+                  </div>
+                  <div className="text-xs text-neutral-500">
+                    {dateRange === 'all' ? (stats.soldSeats || 0) : (displayTicketsSold || 0)} {t('eventAnalytics.purchases')} / {stats.pageViews || 0} {t('eventAnalytics.views')}
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-neutral-600">{t('eventAnalytics.totalRevenue')}</span>
+                    <span className="text-xl font-bold text-teal-600">
+                      {formatCurrency(displayRevenue || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -638,8 +676,7 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('eventAnalytics.transaction')}</TableHead>
-                    <TableHead className="text-right hidden sm:table-cell">{t('eventAnalytics.amount')}</TableHead>
-                    <TableHead className="text-right">{t('common.status')}</TableHead>
+                    <TableHead className="text-right">{t('eventAnalytics.amount')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -651,10 +688,9 @@ export function EventAnalytics({ eventId, onNavigate }: EventAnalyticsProps) {
                           <div className="text-sm text-neutral-500">{transaction.buyer}</div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right hidden sm:table-cell">
+                      <TableCell className="text-right text-teal-600">
                         {formatCurrency(transaction.amount)}
                       </TableCell>
-                      <TableCell className="text-right">{getStatusBadge(transaction.status)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

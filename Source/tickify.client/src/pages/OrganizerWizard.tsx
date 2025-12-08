@@ -893,18 +893,13 @@ export function OrganizerWizard({ onNavigate, eventId }: OrganizerWizardProps) {
               <div className="mt-8 border-t pt-6">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <h4 className="text-sm font-semibold text-blue-900 mb-2">
-                    ℹ️ Seat Map Configuration
+                    ℹ️ {t('wizard.organizer.seatMapConfigTitle')}
                   </h4>
                   <p className="text-sm text-blue-700">
-                    You can create a seat map for this event{" "}
-                    <strong>after publishing</strong>. Go to Event Management →
-                    Select your event → Create Seat Map.
+                    {t('wizard.organizer.seatMapConfigDesc1')}
                   </p>
                   <p className="text-sm text-blue-700 mt-2">
-                    <strong>Important:</strong> Make sure to create ticket types
-                    (above) that match your seat map zones. For example, if your
-                    seat map has "VIP" and "Standard" zones, create ticket types
-                    with those exact names.
+                    <strong>{t('wizard.organizer.important')}:</strong> {t('wizard.organizer.seatMapConfigDesc2')}
                   </p>
                 </div>
               </div>
