@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Tickify.Data;
 using Tickify.DTOs.Admin;
+using Tickify.DTOs.Event;
 using Tickify.Exceptions;
 using Tickify.Interfaces.Repositories;
 using Tickify.Interfaces.Services;
@@ -361,6 +362,60 @@ public class AdminService : IAdminService
                 .ThenInclude(o => o!.User)
             .OrderByDescending(e => e.CreatedAt)
             .ToListAsync();
+    }
+
+    public async Task<List<EventAnalyticsDto>> GetAllEventsWithAnalyticsAsync()
+    {
+        // Get all events with ticket types and bookings for analytics calculation
+        var events = await _context.Events
+            .Include(e => e.Category)
+            .Include(e => e.Organizer)
+                .ThenInclude(o => o!.User)
+            .Include(e => e.TicketTypes)
+            .Include(e => e.Bookings)
+                .ThenInclude(b => b.Tickets)
+            .OrderByDescending(e => e.CreatedAt)
+            .ToListAsync();
+
+        // Map to EventAnalyticsDto with calculated analytics data
+        var eventAnalyticsList = events.Select(e =>
+        {
+            // Calculate total capacity from all ticket types (TotalQuantity)
+            var capacity = e.TicketTypes?.Sum(tt => tt.TotalQuantity) ?? 0;
+
+            // Calculate total sold tickets (TotalQuantity - AvailableQuantity)
+            var soldTickets = e.TicketTypes?.Sum(tt => tt.TotalQuantity - tt.AvailableQuantity) ?? 0;
+
+            // Calculate total revenue from confirmed bookings
+            var revenue = e.Bookings?
+                .Where(b => b.Status == BookingStatus.Confirmed)
+                .Sum(b => b.TotalAmount) ?? 0m;
+
+            // Calculate sales rate percentage
+            var salesRate = capacity > 0 ? (double)soldTickets / capacity * 100 : 0;
+
+            return new EventAnalyticsDto
+            {
+                EventId = e.Id,
+                Title = e.Title,
+                BannerImage = e.BannerImage,
+                PosterImage = e.PosterImage,
+                Location = e.Location,
+                StartDate = e.StartDate,
+                EndDate = e.EndDate,
+                Status = e.Status.ToString(),
+                CategoryName = e.Category?.Name ?? "Unknown",
+                OrganizerName = e.Organizer?.User?.FullName ?? "Unknown",
+                OrganizerId = e.OrganizerId,
+                CreatedAt = e.CreatedAt,
+                Revenue = revenue,
+                SoldTickets = soldTickets,
+                Capacity = capacity,
+                SalesRate = Math.Round(salesRate, 2)
+            };
+        }).ToList();
+
+        return eventAnalyticsList;
     }
 
     public async Task<AdminDashboardStatsDto> GetDashboardStatsAsync()

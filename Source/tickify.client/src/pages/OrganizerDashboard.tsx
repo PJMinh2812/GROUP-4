@@ -1089,7 +1089,7 @@ export function OrganizerDashboard({ onNavigate }: OrganizerDashboardProps) {
                                       : { backgroundColor: '#f5f5f5', color: '#525252', borderColor: '#d4d4d4' }
                                   }
                                 >
-                                  {event.status}
+                                  {t(`organizer.dashboard.${event.status.toLowerCase()}`, event.status)}
                                 </Badge>
                               </div>
                             </TableCell>

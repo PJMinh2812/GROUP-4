@@ -1,4 +1,5 @@
 using Tickify.DTOs.Admin;
+using Tickify.DTOs.Event;
 using Tickify.Models;
 
 namespace Tickify.Interfaces.Services;
@@ -14,6 +15,7 @@ public interface IAdminService
     // Event Approval
     Task<List<Event>> GetAllPendingEventsAsync();
     Task<List<Event>> GetAllEventsAsync(); // Get all events for admin dashboard
+    Task<List<EventAnalyticsDto>> GetAllEventsWithAnalyticsAsync(); // Get events with analytics data for charts
     Task<Event> ApproveEventAsync(int eventId, int adminId);
     Task<Event> RejectEventAsync(int eventId, int adminId, string? rejectionReason = null);
     

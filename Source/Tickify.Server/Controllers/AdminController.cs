@@ -179,6 +179,17 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// GET /api/admin/events/analytics - Get all events with analytics data (revenue, tickets sold, capacity)
+    /// </summary>
+    [HttpGet("events/analytics")]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAllEventsWithAnalytics()
+    {
+        var events = await _adminService.GetAllEventsWithAnalyticsAsync();
+        return Ok(ApiResponse<object>.SuccessResponse(events, $"Retrieved {events.Count} events with analytics"));
+    }
+
+    /// <summary>
     /// POST /api/admin/events/{id}/approve - Approve event
     /// </summary>
     [HttpPost("events/{id}/approve")]

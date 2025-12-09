@@ -89,6 +89,9 @@ import { toast } from "sonner";
 import { userService, type UserDetailDto, type UserListDto } from "../services/userService";
 import { authService } from "../services/authService";
 
+// Colors for pie chart
+const COLORS = ['#00C16A', '#FF6B6B', '#4ECDC4', '#FFE66D', '#A8E6CF', '#FF8B94', '#C7CEEA', '#FFDAC1'];
+
 interface AdminDashboardProps {
   onNavigate: (page: string, eventId?: string) => void;
 }
@@ -168,6 +171,10 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false);
   const [chartDateFilter, setChartDateFilter] = useState("all"); // For charts filtering
 
+  // Analytics state (for Analytics tab)
+  const [analyticsEvents, setAnalyticsEvents] = useState<any[]>([]);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+
   const formatPrice = (price: number) => {
     const isVietnamese = i18n.language === 'vi';
     
@@ -238,12 +245,30 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
     month: formatMonthLabel(item.month)
   }));
 
-  // Load data on component mount for badge counts
+  // Load data on component mount - only load minimal data for badges
   useEffect(() => {
-    loadAllEvents();
-    loadOrganizerRequests();
-    loadDashboardData();
+    // Load only badge counts initially
+    loadBadgeCounts();
+    // Load dashboard data only if on overview tab
+    if (activeTab === "overview") {
+      loadDashboardData();
+    }
   }, []);
+
+  // Optimized badge count loading
+  const loadBadgeCounts = async () => {
+    try {
+      // Load minimal data for badge counts in parallel
+      const [events, requests] = await Promise.all([
+        adminService.getAllEvents(),
+        adminService.getOrganizerRequests()
+      ]);
+      setAllEvents(events);
+      setOrganizerRequests(requests);
+    } catch (error) {
+      console.error('Failed to load badge counts:', error);
+    }
+  };
 
   const loadDashboardData = async () => {
     if (activeTab !== "overview") return;
@@ -274,10 +299,29 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
     }
   };
 
+  const loadAnalyticsEvents = async () => {
+    setIsLoadingAnalytics(true);
+    try {
+      const events = await adminService.getAllEventsWithAnalytics();
+      setAnalyticsEvents(events);
+    } catch (error: any) {
+      console.error("Failed to load analytics events:", error);
+      toast.error("Không thể tải dữ liệu phân tích", {
+        description: error.response?.data?.message || "Vui lòng thử lại sau",
+        duration: 2000,
+        closeButton: false,
+      });
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  };
+
   // Reload dashboard data when switching to overview tab
   useEffect(() => {
     if (activeTab === "overview") {
       loadDashboardData();
+    } else if (activeTab === "analytics") {
+      loadAnalyticsEvents();
     }
   }, [activeTab]);
 
@@ -291,16 +335,16 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
     setOrganizerPage(1);
   }, [organizerDateFilter, organizerSearchTerm, organizerStatusFilter]);
 
-  // Load organizer requests and users based on active tab
+  // Load data based on active tab - optimized to avoid redundant loads
   useEffect(() => {
-    if (activeTab === "requests") {
+    if (activeTab === "requests" && organizerRequests.length === 0) {
       loadOrganizerRequests();
-    } else if (activeTab === "event-approvals") {
-      loadAllEvents();
-    } else if (activeTab === "events") {
-      loadAllEvents();
+    } else if ((activeTab === "event-approvals" || activeTab === "events") && allEvents.length === 0) {
+      loadAllEvents(true); // Skip seat map check on initial load
     } else if (activeTab === 'users') {
       loadUsers();
+    } else if (activeTab === "overview") {
+      loadDashboardData();
     }
   }, [activeTab]);
 
@@ -440,27 +484,35 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
     }
   };
 
-  const loadAllEvents = async () => {
+  const loadAllEvents = async (skipSeatMapCheck = true) => {
     setIsLoadingEvents(true);
     try {
       const events = await adminService.getAllEvents();
       setAllEvents(events);
       setPendingEvents(events); // Keep for backward compatibility
 
-      // Check seat map status for each event
-      const seatMapStatusMap: Record<number, boolean> = {};
-      for (const event of events) {
-        if (event.eventId) {
-          const eventId = event.eventId;
-          try {
-            await apiClient.get(`/seatmaps/event/${eventId}`);
-            seatMapStatusMap[eventId] = true;
-          } catch (error: any) {
-            seatMapStatusMap[eventId] = false;
-          }
+      // Only check seat map status when explicitly needed (not on initial load)
+      if (!skipSeatMapCheck) {
+        const seatMapStatusMap: Record<number, boolean> = {};
+        // Load seat maps in batches to avoid overwhelming the server
+        const batchSize = 5;
+        for (let i = 0; i < events.length; i += batchSize) {
+          const batch = events.slice(i, i + batchSize);
+          await Promise.all(
+            batch.map(async (event) => {
+              if (event.eventId) {
+                try {
+                  await apiClient.get(`/seatmaps/event/${event.eventId}`);
+                  seatMapStatusMap[event.eventId] = true;
+                } catch (error: any) {
+                  seatMapStatusMap[event.eventId] = false;
+                }
+              }
+            })
+          );
         }
+        setEventSeatMapStatus(seatMapStatusMap);
       }
-      setEventSeatMapStatus(seatMapStatusMap);
     } catch (error: any) {
       console.error("Failed to load events:", error);
       toast.error("Không thể tải danh sách sự kiện", {
@@ -2459,9 +2511,9 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           <TabsContent value="payouts">
             <Card>
               <CardHeader>
-                <CardTitle>Payout Management</CardTitle>
+                <CardTitle>{t('admin.payoutManagement', 'Payout Management')}</CardTitle>
                 <CardDescription>
-                  Review and approve organizer payout requests
+                  {t('admin.reviewPayoutRequests', 'Review and approve organizer payout requests')}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -2471,20 +2523,178 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           </TabsContent>
 
           {/* Analytics Tab */}
-          <TabsContent value="analytics" className="space-y-6">
-            <Card>
-              <CardContent className="py-16">
+          <TabsContent value="analytics">
+            {isLoadingAnalytics ? (
+              <div className="flex items-center justify-center h-96">
                 <div className="text-center">
-                  <TrendingUp className="mx-auto text-neutral-400 mb-4" size={64} />
-                  <h3 className="text-xl font-semibold mb-2">
-                    {t('admin.analyticsComingSoon', 'Analytics Coming Soon')}
-                  </h3>
-                  <p className="text-neutral-600">
-                    {t('admin.analyticsComingSoonDesc', 'Advanced analytics and insights will be available soon')}
-                  </p>
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+                  <p className="text-neutral-500">{t("admin.loadingAnalytics", "Đang tải dữ liệu phân tích...")}</p>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Revenue by Event - Bar Chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      {t("admin.revenueByEvent", "Doanh thu theo sự kiện")}
+                    </CardTitle>
+                    <CardDescription>
+                      {t("admin.eventComparison", "So sánh hiệu suất sự kiện")}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {analyticsEvents && analyticsEvents.filter(e => e.revenue && e.revenue > 0).length > 0 ? (
+                      <ResponsiveContainer width="100%" height={350}>
+                        <BarChart 
+                          data={
+                            analyticsEvents
+                              .filter(e => e.revenue && e.revenue > 0)
+                              .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+                              .slice(0, 5)
+                              .map(e => ({
+                                eventId: e.eventId,
+                                title: e.title && e.title.length > 20 ? e.title.substring(0, 20) + '...' : e.title,
+                                revenue: e.revenue || 0,
+                              ticketsSold: e.soldTickets || 0
+                            }))
+                        } 
+                        margin={{ top: 20, right: 30, left: -15, bottom: 25 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="title" 
+                          angle={-45}
+                          textAnchor="end"
+                          height={80}
+                          interval={0}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <YAxis 
+                          width={80}
+                          tickFormatter={(value) => {
+                            const isVietnamese = i18n.language === 'vi';
+                            if (isVietnamese) {
+                              if (value < 1000) {
+                                return value + "₫";
+                              } else if (value < 1000000) {
+                                return (value / 1000).toFixed(0) + "k ₫";
+                              } else if (value < 1000000000) {
+                                return (value / 1000000).toFixed(1).replace(".0", "") + "tr ₫";
+                              } else {
+                                return (value / 1000000000).toFixed(1).replace(".0", "") + "tỷ ₫";
+                              }
+                            } else {
+                              if (value < 1000) {
+                                return value + "VND";
+                              } else if (value < 1000000) {
+                                return (value / 1000).toFixed(0) + "K";
+                              } else if (value < 1000000000) {
+                                return (value / 1000000).toFixed(1).replace(".0", "") + "M";
+                              } else {
+                                return (value / 1000000000).toFixed(1).replace(".0", "") + "B";
+                              }
+                            }
+                          }}
+                        />
+                        <Tooltip
+                          formatter={(value: number) => formatPrice(value)}
+                        />
+                        <Bar dataKey="revenue" fill="#f97316" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex items-center justify-center h-[350px] text-neutral-500">
+                      <div className="text-center">
+                        <Calendar className="mx-auto mb-2 text-neutral-300" size={48} />
+                        <p>{t("admin.noRevenueData", "Không có dữ liệu doanh thu")}</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Ticket Sales Rate */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {t("admin.salesRate", "Tỷ lệ bán vé")}
+                  </CardTitle>
+                  <CardDescription>
+                    {t("admin.percentageSold", "Phần trăm vé đã bán")}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {(() => {
+                      // Get events that have sold at least 1 ticket
+                      const eventsWithSales = analyticsEvents.filter(e => e.soldTickets && e.soldTickets > 0);
+
+                      if (eventsWithSales.length === 0) {
+                        return (
+                          <div className="flex items-center justify-center py-12 text-neutral-500">
+                            <div className="text-center">
+                              <Calendar className="mx-auto mb-3 text-neutral-300" size={48} />
+                              <p className="text-base font-medium text-neutral-600">
+                                {t("admin.noTicketsSold", "Chưa có vé nào được bán")}
+                              </p>
+                              <p className="text-sm text-neutral-400 mt-1">
+                                {t("admin.ticketSalesHint", "Dữ liệu bán vé sẽ xuất hiện ở đây khi khách hàng mua vé")}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return eventsWithSales
+                        .sort((a, b) => {
+                          // Sort by tickets sold descending
+                          return (b.soldTickets || 0) - (a.soldTickets || 0);
+                        })
+                        .slice(0, 5)
+                        .map((event) => {
+                          const soldTickets = event.soldTickets || 0;
+                          const totalSeats = event.capacity || 0;
+                          const salesRate = totalSeats > 0
+                            ? ((soldTickets / totalSeats) * 100).toFixed(1)
+                            : "0";
+
+                          return (
+                            <div 
+                              key={event.eventId}
+                              className="hover:bg-neutral-50 p-2.5 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-orange-200"
+                            >
+                              <div className="flex justify-between items-start mb-1.5">
+                                <div className="flex-1 pr-3">
+                                  <span className="text-sm text-neutral-900 font-medium block truncate">
+                                    {event.title}
+                                  </span>
+                                  <span className="text-xs text-neutral-500 mt-0.5 block">
+                                    {soldTickets.toLocaleString()} {t("admin.ticketsSoldLabel", "vé đã bán")}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-sm font-semibold text-orange-600 whitespace-nowrap">{salesRate}%</span>
+                                  <span className="text-xs text-neutral-500 block mt-0.5 whitespace-nowrap">
+                                    {soldTickets}/{totalSeats}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="w-full bg-neutral-200 rounded-full h-2">
+                                <div
+                                  className="bg-orange-500 h-2 rounded-full transition-all"
+                                  style={{ width: `${salesRate}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        });
+                    })()}
+                  </div>
+                </CardContent>
+              </Card>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>
@@ -2760,7 +2970,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
 
 // Admin Payouts Management Component
 function AdminPayoutsManagement() {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [payouts, setPayouts] = useState<PayoutDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPayout, setSelectedPayout] = useState<PayoutDto | null>(null);
@@ -2848,28 +3058,28 @@ function AdminPayoutsManagement() {
         return (
           <Badge className="bg-yellow-100 text-yellow-700">
             <Clock size={12} className="mr-1" />
-            Pending
+            {t('admin.pending', 'Pending')}
           </Badge>
         );
       case "approved":
         return (
           <Badge className="bg-blue-100 text-blue-700">
             <CheckCircle size={12} className="mr-1" />
-            Approved
+            {t('admin.approved', 'Approved')}
           </Badge>
         );
       case "processed":
         return (
           <Badge className="bg-green-100 text-green-700">
             <CheckCircle size={12} className="mr-1" />
-            Processed
+            {t('common.processed', 'Processed')}
           </Badge>
         );
       case "rejected":
         return (
           <Badge className="bg-red-100 text-red-700">
             <XCircle size={12} className="mr-1" />
-            Rejected
+            {t('admin.rejected', 'Rejected')}
           </Badge>
         );
       default:
@@ -2878,7 +3088,7 @@ function AdminPayoutsManagement() {
   };
 
   if (loading) {
-    return <div className="text-center py-8">Loading payouts...</div>;
+    return <div className="text-center py-8">{t('admin.loadingPayouts', 'Loading payouts...')}</div>;
   }
 
   const pendingPayouts = payouts.filter(
@@ -2892,7 +3102,7 @@ function AdminPayoutsManagement() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm text-neutral-600">
-              Total Payouts
+              {t('admin.totalPayouts', 'Total Payouts')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2901,7 +3111,7 @@ function AdminPayoutsManagement() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-neutral-600">Pending</CardTitle>
+            <CardTitle className="text-sm text-neutral-600">{t('admin.pending', 'Pending')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl text-yellow-600">
@@ -2912,7 +3122,7 @@ function AdminPayoutsManagement() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm text-neutral-600">
-              Total Amount
+              {t('admin.totalAmount', 'Total Amount')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2928,11 +3138,11 @@ function AdminPayoutsManagement() {
         <TableHeader>
           <TableRow>
             <TableHead>ID</TableHead>
-            <TableHead>Organizer</TableHead>
-            <TableHead>Amount</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Requested</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
+            <TableHead>{t('admin.organizerName', 'Organizer')}</TableHead>
+            <TableHead>{t('admin.amount', 'Amount')}</TableHead>
+            <TableHead>{t('admin.status', 'Status')}</TableHead>
+            <TableHead>{t('admin.requested', 'Requested')}</TableHead>
+            <TableHead className="text-right">{t('admin.actions', 'Actions')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -2942,7 +3152,7 @@ function AdminPayoutsManagement() {
                 colSpan={6}
                 className="text-center py-8 text-neutral-500"
               >
-                No payout requests
+                {t('admin.noPayoutRequests', 'No payout requests')}
               </TableCell>
             </TableRow>
           ) : (
@@ -2969,7 +3179,7 @@ function AdminPayoutsManagement() {
                           setShowApproveDialog(true);
                         }}
                       >
-                        Approve
+                        {t('admin.approve', 'Approve')}
                       </Button>
                       <Button
                         size="sm"
@@ -2980,7 +3190,7 @@ function AdminPayoutsManagement() {
                           setShowRejectDialog(true);
                         }}
                       >
-                        Reject
+                        {t('admin.reject', 'Reject')}
                       </Button>
                     </div>
                   )}
@@ -2995,29 +3205,29 @@ function AdminPayoutsManagement() {
       <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Approve Payout</DialogTitle>
+            <DialogTitle>{t('admin.approvePayout', 'Approve Payout')}</DialogTitle>
             <DialogDescription>
-              Approve payout request #{selectedPayout?.payoutId} for{" "}
+              {t('admin.approvePayoutDesc', 'Approve payout request')} #{selectedPayout?.payoutId} {t('admin.for', 'for')}{" "}
               {formatPrice(selectedPayout?.amount || 0)}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
-              <Label htmlFor="transactionId">Transaction ID (Optional)</Label>
+              <Label htmlFor="transactionId">{t('admin.transactionIdOptional', 'Transaction ID (Optional)')}</Label>
               <Input
                 id="transactionId"
                 value={transactionId}
                 onChange={(e) => setTransactionId(e.target.value)}
-                placeholder="Bank transfer transaction ID"
+                placeholder={t('admin.transactionIdPlaceholder', 'Bank transfer transaction ID')}
               />
             </div>
             <div>
-              <Label htmlFor="approveNotes">Notes (Optional)</Label>
+              <Label htmlFor="approveNotes">{t('admin.notesOptional', 'Notes (Optional)')}</Label>
               <Textarea
                 id="approveNotes"
                 value={approveNotes}
                 onChange={(e) => setApproveNotes(e.target.value)}
-                placeholder="Additional notes..."
+                placeholder={t('admin.additionalNotes', 'Additional notes...')}
               />
             </div>
           </div>
@@ -3026,13 +3236,13 @@ function AdminPayoutsManagement() {
               variant="outline"
               onClick={() => setShowApproveDialog(false)}
             >
-              Cancel
+              {t('admin.cancel', 'Cancel')}
             </Button>
             <Button
               onClick={handleApprove}
               className="bg-green-500 hover:bg-green-600"
             >
-              Approve
+              {t('admin.approve', 'Approve')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3042,20 +3252,20 @@ function AdminPayoutsManagement() {
       <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reject Payout</DialogTitle>
+            <DialogTitle>{t('admin.rejectPayout', 'Reject Payout')}</DialogTitle>
             <DialogDescription>
-              Reject payout request #{selectedPayout?.payoutId} for{" "}
+              {t('admin.rejectPayoutDesc', 'Reject payout request')} #{selectedPayout?.payoutId} {t('admin.for', 'for')}{" "}
               {formatPrice(selectedPayout?.amount || 0)}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
-              <Label htmlFor="rejectReason">Reason *</Label>
+              <Label htmlFor="rejectReason">{t('admin.reasonRequired', 'Reason *')}</Label>
               <Textarea
                 id="rejectReason"
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Reason for rejection..."
+                placeholder={t('admin.reasonForRejection', 'Reason for rejection...')}
                 required
               />
             </div>
@@ -3065,14 +3275,14 @@ function AdminPayoutsManagement() {
               variant="outline"
               onClick={() => setShowRejectDialog(false)}
             >
-              Cancel
+              {t('admin.cancel', 'Cancel')}
             </Button>
             <Button
               onClick={handleReject}
               className="bg-red-500 hover:bg-red-600"
               disabled={!rejectReason}
             >
-              Reject
+              {t('admin.reject', 'Reject')}
             </Button>
           </DialogFooter>
         </DialogContent>

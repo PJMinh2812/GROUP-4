@@ -124,6 +124,14 @@ export const adminService = {
   },
 
   /**
+   * GET /api/admin/events/analytics - Get all events with analytics data
+   */
+  async getAllEventsWithAnalytics(): Promise<any[]> {
+    const response = await apiClient.get('/admin/events/analytics');
+    return response.data.data || response.data || [];
+  },
+
+  /**
    * POST /api/admin/events/{id}/approve - Approve event
    */
   async approveEvent(id: number): Promise<void> {
