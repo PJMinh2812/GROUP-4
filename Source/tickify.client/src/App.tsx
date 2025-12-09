@@ -69,9 +69,7 @@ const AcceptTransfer = lazy(() =>
 const Wishlist = lazy(() =>
   import("./pages/Wishlist").then((m) => ({ default: m.Wishlist }))
 );
-const Waitlist = lazy(() =>
-  import("./pages/Waitlist").then((m) => ({ default: m.Waitlist }))
-);
+const Waitlist = lazy(() => import("./pages/Waitlist"));
 const OrganizerWizard = lazy(() =>
   import("./pages/OrganizerWizard").then((m) => ({
     default: m.OrganizerWizard,

@@ -1049,7 +1049,7 @@ export function OrganizerDashboard({ onNavigate }: OrganizerDashboardProps) {
                             <TableCell className="w-[14%] text-center">
                               <div className="text-sm whitespace-nowrap">
                                 {new Date(event.startDate).toLocaleDateString(
-                                  "en-US",
+                                  i18n.language === 'vi' ? 'vi-VN' : 'en-US',
                                   {
                                     month: "short",
                                     day: "numeric",
@@ -1059,7 +1059,7 @@ export function OrganizerDashboard({ onNavigate }: OrganizerDashboardProps) {
                               </div>
                               <div className="text-xs text-neutral-500 whitespace-nowrap">
                                 {new Date(event.startDate).toLocaleTimeString(
-                                  "en-US",
+                                  i18n.language === 'vi' ? 'vi-VN' : 'en-US',
                                   {
                                     hour: "2-digit",
                                     minute: "2-digit",
@@ -1070,14 +1070,23 @@ export function OrganizerDashboard({ onNavigate }: OrganizerDashboardProps) {
                             <TableCell className="w-[12%] text-center">
                               <div className="flex justify-center">
                                 <Badge
-                                  className={
-                                    event.status === "Approved"
-                                      ? "bg-green-100 text-green-700"
+                                  variant="outline"
+                                  style={
+                                    event.status === "Published"
+                                      ? { backgroundColor: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }
+                                      : event.status === "Approved"
+                                      ? { backgroundColor: '#d1fae5', color: '#047857', borderColor: '#a7f3d0' }
+                                      : event.status === "Completed"
+                                      ? { backgroundColor: '#ccfbf1', color: '#0f766e', borderColor: '#99f6e4' }
                                       : event.status === "Pending"
-                                      ? "bg-yellow-100 text-yellow-700"
+                                      ? { backgroundColor: '#fef3c7', color: '#b45309', borderColor: '#fde68a' }
                                       : event.status === "Rejected"
-                                      ? "bg-red-100 text-red-700"
-                                      : "bg-neutral-100 text-neutral-700"
+                                      ? { backgroundColor: '#ffe4e6', color: '#be123c', borderColor: '#fecdd3' }
+                                      : event.status === "Cancelled"
+                                      ? { backgroundColor: '#f3f4f6', color: '#4b5563', borderColor: '#d1d5db' }
+                                      : event.status === "Draft"
+                                      ? { backgroundColor: '#f1f5f9', color: '#475569', borderColor: '#cbd5e1' }
+                                      : { backgroundColor: '#f5f5f5', color: '#525252', borderColor: '#d4d4d4' }
                                   }
                                 >
                                   {event.status}

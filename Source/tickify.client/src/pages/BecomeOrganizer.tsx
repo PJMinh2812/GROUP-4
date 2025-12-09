@@ -5,10 +5,12 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Building2, Mail, Phone, FileText, CheckCircle2, AlertCircle, Clock } from "lucide-react";
+import { Badge } from "../components/ui/badge";
 import { organizerService } from "../services/organizerService";
 import { authService } from "../services/authService";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import i18n from "../i18n";
 
 interface BecomeOrganizerProps {
   onNavigate: (page: string) => void;
@@ -171,21 +173,36 @@ export function BecomeOrganizer({ onNavigate }: BecomeOrganizerProps) {
                   <p className="text-sm font-medium text-neutral-700 mb-2">
                     {t('organizer.organizationName')}:
                   </p>
-                  <p className="text-sm text-neutral-600">{pendingRequest.organizationName}</p>
+                  <p className="text-sm text-neutral-600">{pendingRequest.organizationName || pendingRequest.companyName}</p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-neutral-700 mb-2">
                     {t('organizer.requestDate', 'Ngày gửi yêu cầu')}:
                   </p>
                   <p className="text-sm text-neutral-600">
-                    {new Date(pendingRequest.requestedAt).toLocaleString("vi-VN")}
+                    {new Date(pendingRequest.requestedAt).toLocaleString(
+                      i18n.language === 'vi' ? 'vi-VN' : 'en-US'
+                    )}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-neutral-700 mb-2">
                     {t('organizer.status', 'Trạng thái')}:
                   </p>
-                  <p className="text-sm text-orange-600 font-semibold">{pendingRequest.status}</p>
+                  <Badge
+                    variant="outline"
+                    style={
+                      pendingRequest.status === "Approved"
+                        ? { backgroundColor: '#d1fae5', color: '#047857', borderColor: '#a7f3d0' }
+                        : pendingRequest.status === "Pending"
+                        ? { backgroundColor: '#fef3c7', color: '#b45309', borderColor: '#fde68a' }
+                        : pendingRequest.status === "Rejected"
+                        ? { backgroundColor: '#ffe4e6', color: '#be123c', borderColor: '#fecdd3' }
+                        : { backgroundColor: '#f1f5f9', color: '#475569', borderColor: '#cbd5e1' }
+                    }
+                  >
+                    {pendingRequest.status}
+                  </Badge>
                 </div>
                 <Button onClick={() => onNavigate("home")} variant="outline" className="w-full">
                   {t('common.backToHome', 'Về trang chủ')}
